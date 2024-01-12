@@ -13,6 +13,7 @@ find_package(hpp-fcl REQUIRED)
 include_directories(${HPP_FCL_INCLUDE_DIRS})
 
 include_directories("/usr/include/eigen3")
+include_directories("include")
 
 # Add your project's source files and target
 add_executable(test src/pinocchio_model.cpp)

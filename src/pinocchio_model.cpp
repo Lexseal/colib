@@ -1,116 +1,86 @@
-#include <pinocchio/parsers/urdf.hpp>
-#include <pinocchio/multibody/model.hpp>
-#include <pinocchio/algorithm/kinematics.hpp>
+#include <pinocchio_model.h>
 
-enum JointType {
-  REVOLUTE,
-  PRISMATIC,
-  CONTINUOUS,
-  UNKNOWN
-};
+PinocchioModel::PinocchioModel(const std::string &urdf_file_path, const Eigen_Transform3d &base_frame)
+  : m_urdf_file_path(urdf_file_path)
+  , m_base_frame(base_frame) {
+  pinocchio::urdf::buildModel(m_urdf_file_path, m_model);
+  m_data = pinocchio::Data(m_model);
+  calc_joint_names();
+  calc_link_names();
+  calc_joint_types();
+  calc_joint_limits();
+}
 
-using Eigen_Transform3d = Eigen::Transform<double, 3, Eigen::Isometry>;
-
-class PinocchioModel {
-public:
-  PinocchioModel(const std::string &urdf_file_path) : m_urdf_file_path(urdf_file_path) {
-    pinocchio::urdf::buildModel(m_urdf_file_path, m_model);
-    m_data = pinocchio::Data(m_model);
-    calc_joint_names();
-    calc_link_names();
-    calc_joint_types();
-    calc_joint_limits();
+std::vector<Eigen_Transform3d> PinocchioModel::calculate_link_poses(const Eigen::VectorXd &joint_angles,
+                                                                    bool wrt_world) {
+  assert(joint_angles.size() == m_joint_names.size());
+  std::vector<Eigen_Transform3d> link_poses;
+  pinocchio::forwardKinematics(m_model, m_data, joint_angles);
+  
+  for (size_t i = 0; i < m_link_names.size(); i++) {
+    const std::string &link_name = m_link_names[i];
+    pinocchio::SE3 link_pose = m_data.oMi[m_model.getFrameId(link_name)];
+    Eigen_Transform3d link_pose_eigen = pinocchio_to_eigen_transform(link_pose);
+    if (wrt_world) link_pose_eigen = m_base_frame * link_pose_eigen;
+    link_poses.push_back(link_pose_eigen);
   }
+  
+  return link_poses;
+}
 
-  const std::vector<std::string>& get_joint_names() const { return m_joint_names; }
+std::vector<Eigen_Transform3d> PinocchioModel::calculate_link_poses(const std::vector<double> &joint_angles,
+                                                                    bool wrt_world) {
+  Eigen::VectorXd joint_angles_eigen = Eigen::Map<const Eigen::VectorXd>(joint_angles.data(), joint_angles.size());
+  return calculate_link_poses(joint_angles_eigen, wrt_world);
+}
 
-  const std::vector<JointType>& get_joint_types() const { return m_joint_types; }
-
-  const std::vector<std::string>& get_link_names() const { return m_link_names; }
-
-  const std::vector<std::pair<double, double>> get_joint_limits() const { return m_joint_limits; }
-
-
-  std::vector<Eigen_Transform3d> calculate_link_poses(const Eigen::VectorXd &joint_angles) {
-    assert(joint_angles.size() == m_joint_names.size());
-    std::vector<Eigen_Transform3d> link_poses;
-    pinocchio::forwardKinematics(m_model, m_data, joint_angles);
-    
-    for (size_t i = 0; i < m_link_names.size(); i++) {
-      const std::string &link_name = m_link_names[i];
-      pinocchio::SE3 link_pose = m_data.oMi[m_model.getFrameId(link_name)];
-      link_poses.push_back(pinocchio_to_eigen_transform(link_pose));
-    }
-    
-    return link_poses;
+void PinocchioModel::calc_joint_names() {
+  for (int i = 1; i < m_model.njoints; ++i) {  // starting from 1 to skip the universe joint
+    m_joint_names.push_back(m_model.names[i]);
   }
+}
 
-  std::vector<Eigen_Transform3d> calculate_link_poses(const std::vector<double> &joint_angles) {
-    Eigen::VectorXd joint_angles_eigen = Eigen::Map<const Eigen::VectorXd>(joint_angles.data(), joint_angles.size());
-    return calculate_link_poses(joint_angles_eigen);
-  }
-
-  const std::string& get_urdf_file_path() const { return m_urdf_file_path; }
-
-  pinocchio::Model& get_model() { return m_model; }
-
-private:
-  std::string m_urdf_file_path;
-  pinocchio::Model m_model;
-  pinocchio::Data m_data;
-  std::vector<std::string> m_joint_names;
-  std::vector<std::string> m_link_names;
-  std::vector<JointType> m_joint_types;
-  std::vector<std::pair<double, double>> m_joint_limits;
-
-  void calc_joint_names() {
-    for (int i = 1; i < m_model.njoints; ++i) {  // starting from 1 to skip the universe joint
-      m_joint_names.push_back(m_model.names[i]);
+void PinocchioModel::calc_link_names() {
+  for (size_t i = 0; i < m_model.frames.size(); i++) {
+    if (m_model.frames[i].type == pinocchio::BODY) {
+      m_link_names.push_back(m_model.frames[i].name);
     }
   }
+}
 
-  void calc_link_names() {
-    for (size_t i = 0; i < m_model.frames.size(); i++) {
-      if (m_model.frames[i].type == pinocchio::BODY) {
-        m_link_names.push_back(m_model.frames[i].name);
-      }
+void PinocchioModel::calc_joint_types() {
+  for (int i = 1; i < m_model.njoints; ++i) {  // starting from 1 to skip the universe joint
+    size_t idx_of_interest = m_model.joints[i].classname().size();
+    std::cout << m_model.joints[i].shortname() << " " << idx_of_interest << std::endl;
+    switch (m_model.joints[i].shortname()[idx_of_interest]) {
+      case 'R':
+        if (m_model.joints[i].shortname()[idx_of_interest+1] == 'U') {
+          m_joint_types.push_back(CONTINUOUS);
+        } else {
+          m_joint_types.push_back(REVOLUTE);
+        } 
+        break;
+      case 'P':
+        m_joint_types.push_back(PRISMATIC);
+        break;
+      default:
+        m_joint_types.push_back(UNKNOWN);
+        break;
     }
   }
+}
 
-  void calc_joint_types() {
-    for (int i = 1; i < m_model.njoints; ++i) {  // starting from 1 to skip the universe joint
-      size_t idx_of_interest = m_model.joints[i].classname().size();
-      std::cout << m_model.joints[i].shortname() << " " << idx_of_interest << std::endl;
-      switch (m_model.joints[i].shortname()[idx_of_interest]) {
-        case 'R':
-          if (m_model.joints[i].shortname()[idx_of_interest+1] == 'U') {
-            m_joint_types.push_back(CONTINUOUS);
-          } else {
-            m_joint_types.push_back(REVOLUTE);
-          } 
-          break;
-        case 'P':
-          m_joint_types.push_back(PRISMATIC);
-          break;
-        default:
-          m_joint_types.push_back(UNKNOWN);
-          break;
-      }
-    }
+void PinocchioModel::calc_joint_limits() {
+  for (int i = 1; i < m_model.njoints; ++i) {  // starting from 1 to skip the universe joint
+    m_joint_limits.emplace_back(m_model.lowerPositionLimit[i-1], m_model.upperPositionLimit[i-1]);
   }
+}
 
-  void calc_joint_limits() {
-    for (int i = 1; i < m_model.njoints; ++i) {  // starting from 1 to skip the universe joint
-      m_joint_limits.emplace_back(m_model.lowerPositionLimit[i-1], m_model.upperPositionLimit[i-1]);
-    }
-  }
-
-  Eigen_Transform3d pinocchio_to_eigen_transform(const pinocchio::SE3 &pinocchio_transform) {
-    Eigen_Transform3d eigen_transform;
-    eigen_transform.matrix() = pinocchio_transform.toHomogeneousMatrix();
-    return eigen_transform;
-  }
-};
+Eigen_Transform3d PinocchioModel::pinocchio_to_eigen_transform(const pinocchio::SE3 &pinocchio_transform) {
+  Eigen_Transform3d eigen_transform;
+  eigen_transform.matrix() = pinocchio_transform.toHomogeneousMatrix();
+  return eigen_transform;
+}
 
 int main() {
   PinocchioModel model("/home/xinsonglin/colib/panda/panda.urdf");
