@@ -16,5 +16,5 @@ include_directories("/usr/include/eigen3")
 include_directories("include")
 
 # Add your project's source files and target
-add_executable(test src/pinocchio_model.cpp)
+add_executable(test src/articulated_model.cpp)
 target_link_libraries(test ${PINOCCHIO_LIBRARIES} ${HPP_FCL_LIBRARIES})
