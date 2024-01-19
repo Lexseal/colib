@@ -21,7 +21,7 @@ void ArticulatedModel::calc_collision_model() {
     package_dir = m_urdf_file_path.substr(0, m_urdf_file_path.rfind("/"));
   }
   if (m_srdf_file_path.empty()) {
-    m_srdf_file_path = m_urdf_file_path.replace(m_urdf_file_path.rfind(".urdf"), 5, ".srdf");
+    m_srdf_file_path = m_urdf_file_path.substr(0, m_urdf_file_path.rfind(".urdf")) + ".srdf";
   }
   // std::cout << package_dir << std::endl;
   pinocchio::urdf::buildGeom(m_model, m_urdf_file_path, pinocchio::COLLISION, m_geometry_model, package_dir);

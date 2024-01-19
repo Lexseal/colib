@@ -1,3 +1,5 @@
+#pragma once
+
 #include <unordered_map>
 
 #include <pinocchio/parsers/urdf.hpp>
@@ -68,4 +70,4 @@ private:
   Eigen_Transform3d pinocchio_to_eigen_transform(const pinocchio::SE3 &pinocchio_transform);
 };
 
-using PinocchioModelPtr = std::shared_ptr<ArticulatedModel>;
+using ArticulatedModelPtr = std::shared_ptr<ArticulatedModel>;
